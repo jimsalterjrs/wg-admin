@@ -1,12 +1,15 @@
 #! /usr/bin/perl
 
+use strict;
+
 # apt install libnetaddr-ip-perl
 use NetAddr::IP;
 # apt install libregexp-common-perl
 use Regexp::Common;
 
 # set host configs here!
-my $ServerAllowedIPs = "";
+my $ServerOverrideAllowedIPs = "";
+my $ServerExtraAllowedIPs = "";
 my $ServerEndpoint = "your.server.ip.address:yourwgport";
 
 if ((scalar @ARGV) ne 2) {
@@ -21,6 +24,11 @@ if (! validinterface($interface)) {
 	print "$interface is not a valid wireguard interface!\n";
 	exit 1;
 }
+
+# Default to allowing access to the entire WG subnet on the client, add extra if defined, or override entirely if THAT's defined
+my $ServerAllowedIPs = getwgip($interface);
+if ($ServerExtraAllowedIPs ne '') { $ServerAllowedIPs .=",$ServerExtraAllowedIPs"; }
+if ($ServerOverrideAllowedIPs ne '') { $ServerAllowedIPs = $ServerOverrideAllowedIPs; }
 
 my ($privkey,$pubkey) = getkeys();
 my $ip = nextaddress($interface);
@@ -58,7 +66,7 @@ exit 0;
 ###########################################################################
 ###########################################################################
 
-sub validinterface() {
+sub validinterface {
 	my ($ifarg) = @_;
 
 	open CMD, "/usr/bin/wg show|";
@@ -76,12 +84,16 @@ sub validinterface() {
 	return $found;
 }
 
-sub addpeer() {
+###########################################################################
+
+sub addpeer {
 	my ($interface,$ip,$pubkey) = @_;
 	print `wg set $interface peer $pubkey allowed-ips $ip`;
 }
 
-sub clientconfig() {
+###########################################################################
+
+sub clientconfig {
 	my ($hostname,$ip,$privkey) = @_;
 	my $hostpubkey = `/usr/bin/wg show wg0 public-key`;
 	chomp $hostpubkey;
@@ -101,7 +113,9 @@ sub clientconfig() {
 	return $config;
 }
 
-sub peerstanza() {
+###########################################################################
+
+sub peerstanza {
 	my ($hostname,$ip,$pubkey) = @_;
 	my $stanza = "\n[Peer]\n";
 	$stanza .= "	# $hostname.wg\n";
@@ -110,7 +124,9 @@ sub peerstanza() {
 	return $stanza;
 }
 
-sub getkeys() {
+###########################################################################
+
+sub getkeys {
 
 	open (my $cmd, '-|', '/usr/bin/wg genkey')
 		or die "failed to get privkey: $@\n";
@@ -131,20 +147,33 @@ sub getkeys() {
 
 ###########################################################################
 
-sub nextaddress() {
-	my $interface = $_;
+sub getwgip {
+	my $if = shift;
 
-	open (IP, "/sbin/ip address show $interface |");	
+	open (IP, "/sbin/ip address show $if |");	
 	my $address;
 	foreach my $line (<IP>) {
 		if ($line =~ /inet/) { $address = $line; }
 	}
 	$address =~ s/^.*inet //;
 	$address =~ s/ scope.*$//;
-	
+	close IP;
+
+	return $address;
+}	
+
+###########################################################################
+
+sub nextaddress {
+	my $interface = shift;
+
+	# get the IP address and mask of $interface
+	my $address = getwgip($interface);
+
+	# populate the full subnet $address occupies
 	my $ip = new NetAddr::IP($address);
 	my @ips = $ip->hostenum();
-	
+
 	my @usedips;
 	
 	# first used host is wg0's own IP address. strip subnet and change to /32
@@ -152,13 +181,14 @@ sub nextaddress() {
 	$address =~ s/\/\d{1,2}/\/32/;
 	push @usedips,$address;
 	
-	open (IPS, "/usr/bin/wg show $interface|");
+	open (IPS, "/usr/bin/wg show $interface |");
 	foreach my $line (<IPS>) {
 		if ($line =~ /allowed ip.*?($RE{net}{IPv4})/ ) {
 			my $ip = "$1/32";
 			push @usedips,$ip;
 		}
 	}
+	close IPS;
 	
 	# convert hosts and usedhosts arrays into hashes
 	my %usedips = map { $_ => 1 } @usedips;
