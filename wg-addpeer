@@ -10,10 +10,20 @@ use Regexp::Common;
 # set host configs here!
 my $ServerOverrideAllowedIPs = "";
 my $ServerExtraAllowedIPs = "";
-my $ServerEndpoint = "your.server.ip.address:yourwgport";
+my $ServerEndpoint = "";
 
 if ((scalar @ARGV) ne 2) {
+	print "\n";
 	print "USAGE: wg-addpeer hostname interface\n";
+	print "\n";
+	exit 1;
+}
+
+if ($ServerEndpoint eq '') {
+	print "\n";
+	print "You must at minimum set \$ServerEndpoint inside wg-addpeer for this to work!\n";
+	print "(Also consider setting \$ServerExtraAllowedIPs or \$ServerOverrideAllowedIPs to suit.)\n";
+	print "\n";
 	exit 1;
 }
 
@@ -21,7 +31,9 @@ my $hostname = $ARGV[0];
 my $interface = $ARGV[1];
 
 if (! validinterface($interface)) {
+	print "\n";
 	print "$interface is not a valid wireguard interface!\n";
+	print "\n";
 	exit 1;
 }
 
