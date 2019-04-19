@@ -7,6 +7,12 @@ I am using this in **private** production right now, but it's really not up to m
 
 This notice will be removed in a future version after the utility or utilities contained herein are cleaned up.
 
+**There are a couple variables you must currently configure inside wg-addpeer!**
+
+At minimum, you must set $ServerEndpoint to match the public IP and WireGuard port of your server, eg `127.0.0.1:51820` or similar. By default, clients will be allowed to access the entire subnet configured for the WireGuard interface specified on the CLI; you may append extra subnets to route over the wg interface by setting `$ServerExtraAllowedIPs`, or you may override it entirely by setting `$ServerOverrideAllowedIPs`.
+
+There will eventually be a wg-admin.conf file or something to set this stuff in. (Did I mention we're in super-duper alpha right now...?)
+
 **usage:** `wg-addpeer hostname interface`
 
   Run it on the WireGuard server, it'll generate a new keypair, add the new peer to the running 
