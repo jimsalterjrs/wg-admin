@@ -1,0 +1,179 @@
+#! /usr/bin/perl
+
+# apt install libnetaddr-ip-perl
+use NetAddr::IP;
+# apt install libregexp-common-perl
+use Regexp::Common;
+
+# set host configs here!
+my $ServerAllowedIPs = "";
+my $ServerEndpoint = "your.server.ip.address:yourwgport";
+
+if ((scalar @ARGV) ne 2) {
+	print "USAGE: wg-addpeer hostname interface\n";
+	exit 1;
+}
+
+my $hostname = $ARGV[0];
+my $interface = $ARGV[1];
+
+if (! validinterface($interface)) {
+	print "$interface is not a valid wireguard interface!\n";
+	exit 1;
+}
+
+my ($privkey,$pubkey) = getkeys();
+my $ip = nextaddress($interface);
+
+my $peerstanza = peerstanza($hostname,$ip,$pubkey);
+my $clientconfig = clientconfig($hostname,$ip,$privkey);
+
+print "\nCommit new peer $hostname.wg with pubkey $pubkey to interface $interface? [Y/N] ";
+my $commit = <STDIN>;
+chomp $commit;
+print "\n";
+
+if ($commit eq 'Y' || $commit eq 'y') {
+	# commit
+
+	# add peer to running interface
+	addpeer($interface,$ip,$pubkey);
+
+	# add peer stanza to permanent configs
+	open FH, ">> /etc/wireguard/$interface.conf";
+	print FH $peerstanza;
+	close FH;
+
+	# output new client configs to run on the peer itself
+	print "Client config:\n\n$clientconfig\n";
+} else {
+	# abort
+	print "ABORTED - no changes made to running interface or server configs.\n";
+}
+
+exit 0;
+
+###########################################################################
+###########################################################################
+###########################################################################
+###########################################################################
+
+sub validinterface() {
+	my ($ifarg) = @_;
+
+	open CMD, "/usr/bin/wg show|";
+	my @raw = <CMD>;
+	close CMD;
+
+	my $found = 0;
+	foreach my $line (@raw) {
+		if ($line =~ /interface:/) {
+			$line =~ s/^interface: //;
+			chomp $line;
+			if ($line eq $ifarg) { $found = 1; }
+		}
+	}
+	return $found;
+}
+
+sub addpeer() {
+	my ($interface,$ip,$pubkey) = @_;
+	print `wg set $interface peer $pubkey allowed-ips $ip`;
+}
+
+sub clientconfig() {
+	my ($hostname,$ip,$privkey) = @_;
+	my $hostpubkey = `/usr/bin/wg show wg0 public-key`;
+	chomp $hostpubkey;
+
+	my $config = "[Interface]\n";
+	$config .= "	# $hostname\n";
+	$config .= "	Address = $ip\n";
+	$config .= "	PrivateKey = $privkey\n";
+	$config .= "	SaveConfig = false\n";
+	$config .= "\n";
+	$config .= "[Peer]\n";
+	$config .= "	PublicKey = $hostpubkey\n";
+	$config .= "	PersistentKeepAlive = 20\n";
+	$config .= "	AllowedIPs = $ServerAllowedIPs\n";
+	$config .= "	Endpoint = $ServerEndpoint\n";
+
+	return $config;
+}
+
+sub peerstanza() {
+	my ($hostname,$ip,$pubkey) = @_;
+	my $stanza = "\n[Peer]\n";
+	$stanza .= "	# $hostname.wg\n";
+	$stanza .= "	PublicKey = $pubkey\n";
+	$stanza .= "	AllowedIPs = $ip\n";
+	return $stanza;
+}
+
+sub getkeys() {
+
+	open (my $cmd, '-|', '/usr/bin/wg genkey')
+		or die "failed to get privkey: $@\n";
+	my @privkeyraw = <$cmd>;
+	close ($cmd);
+	my $privkey = $privkeyraw[0];
+	chomp $privkey;
+
+	open ($cmd, '-|', "/bin/echo $privkey | /usr/bin/wg pubkey")
+		or die "failed to get pubkey: $@\n";
+	my @pubkeyraw = <$cmd>;
+	close ($cmd);
+	my $pubkey = $pubkeyraw[0];
+	chomp $pubkey;
+
+	return ($privkey,$pubkey);
+}
+
+###########################################################################
+
+sub nextaddress() {
+	my $interface = $_;
+
+	open (IP, "/sbin/ip address show $interface |");	
+	my $address;
+	foreach my $line (<IP>) {
+		if ($line =~ /inet/) { $address = $line; }
+	}
+	$address =~ s/^.*inet //;
+	$address =~ s/ scope.*$//;
+	
+	my $ip = new NetAddr::IP($address);
+	my @ips = $ip->hostenum();
+	
+	my @usedips;
+	
+	# first used host is wg0's own IP address. strip subnet and change to /32
+	chomp $address;
+	$address =~ s/\/\d{1,2}/\/32/;
+	push @usedips,$address;
+	
+	open (IPS, "/usr/bin/wg show $interface|");
+	foreach my $line (<IPS>) {
+		if ($line =~ /allowed ip.*?($RE{net}{IPv4})/ ) {
+			my $ip = "$1/32";
+			push @usedips,$ip;
+		}
+	}
+	
+	# convert hosts and usedhosts arrays into hashes
+	my %usedips = map { $_ => 1 } @usedips;
+	my %freeips = map { $_ => 1 } @ips;
+	
+	# remove all usedhosts from freehosts
+	foreach my $ip (keys %usedips) {
+		delete $freeips{$ip};
+	}
+	
+	# sort freehosts properly by ip address
+	my @sortedfreeips = map  {$_->[0]}
+		sort {$a->[1] <=> $b->[1]}
+        	map  { [ $_, unpack("N",pack("C4",split(/\./,$_))) ] }
+                keys %freeips;
+	
+	return $sortedfreeips[0];
+}
