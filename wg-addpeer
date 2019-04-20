@@ -46,7 +46,7 @@ my ($privkey,$pubkey) = getkeys();
 my $ip = nextaddress($interface);
 
 my $peerstanza = peerstanza($hostname,$ip,$pubkey);
-my $clientconfig = clientconfig($hostname,$ip,$privkey);
+my $clientconfig = clientconfig($interface,$hostname,$ip,$privkey);
 
 print "\nCommit new peer $hostname.wg with pubkey $pubkey to interface $interface? [Y/N] ";
 my $commit = <STDIN>;
@@ -106,8 +106,8 @@ sub addpeer {
 ###########################################################################
 
 sub clientconfig {
-	my ($hostname,$ip,$privkey) = @_;
-	my $hostpubkey = `/usr/bin/wg show wg0 public-key`;
+	my ($interface,$hostname,$ip,$privkey) = @_;
+	my $hostpubkey = `/usr/bin/wg show $interface public-key`;
 	chomp $hostpubkey;
 
 	my $config = "[Interface]\n";
