@@ -84,18 +84,17 @@ exit 0;
 sub validinterface {
 	my ($ifarg) = @_;
 
-	open CMD, "/usr/bin/wg show|";
-	my @raw = <CMD>;
+	open CMD, "/usr/bin/wg show interfaces |";
+	my @cmd = <CMD>;
 	close CMD;
 
+	my @interfaces = split(' ',$cmd[0])
+
 	my $found = 0;
-	foreach my $line (@raw) {
-		if ($line =~ /interface:/) {
-			$line =~ s/^interface: //;
-			chomp $line;
-			if ($line eq $ifarg) { $found = 1; }
-		}
+	foreach my $line (@interfaces) {
+		if ($line eq $ifarg) { $found = 1; }
 	}
+
 	return $found;
 }
 
