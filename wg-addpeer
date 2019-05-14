@@ -2,6 +2,9 @@
 
 use strict;
 
+use FileHandle; # for multi-directional pipe 
+use IPC::Open2; # opening, to safely invoke wg pubkey
+
 # apt install libnetaddr-ip-perl
 use NetAddr::IP;
 # apt install libregexp-common-perl
@@ -100,7 +103,9 @@ sub validinterface {
 
 sub addpeer {
 	my ($interface,$ip,$pubkey) = @_;
-	print `wg set $interface peer $pubkey allowed-ips $ip`;
+	my @args = ('wg','set',$interface,'peer',$pubkey,'allowed-ips',$ip);
+	system (@args) == 0
+		or die "system @args failed: $?";
 }
 
 ###########################################################################
@@ -147,12 +152,15 @@ sub getkeys {
 	my $privkey = $privkeyraw[0];
 	chomp $privkey;
 
-	open ($cmd, '-|', "/bin/echo $privkey | /usr/bin/wg pubkey")
-		or die "failed to get pubkey: $@\n";
-	my @pubkeyraw = <$cmd>;
-	close ($cmd);
-	my $pubkey = $pubkeyraw[0];
+	my $pid = open2(*Reader,*Writer,"wg pubkey");
+	print Writer "$privkey\n";
+	close(Writer);
+	my $pubkey = <Reader>;
 	chomp $pubkey;
+
+	waitpid($pid,0);
+	my $pid_exit = $? >> 8;
+	if ($pid_exit != 0) { die "failed to generate pubkey: $pid_exit\n"; }
 
 	return ($privkey,$pubkey);
 }
